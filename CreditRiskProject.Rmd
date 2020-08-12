@@ -1,0 +1,237 @@
+---
+title: "Risco de Crédito"
+author: "luiz felipe"
+date: "8/11/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Mini Projeto 4 - Risco de Crédito
+
+O projeto trata de fazer uma análise de crédito para conceder ou não crédito a um determinado cliente.
+
+## Etapa 1 - Coletando dados
+
+Ler arquivo csv
+
+```{r coleta}
+# Coletando dados
+risk <- read.csv("credit_dataset.csv", header = TRUE)
+```
+
+## Etapa 2 - Criando função para separar dados categóricos de quantitativos
+
+```{r separando}
+# Separando variáveis categóricas pelo número de de elementos únicos
+categoricalData <- function(dataFrame, greaterLevel) {
+  vectorTypes <- sapply(dataFrame, 
+                        function(x) ifelse(max(x) >= greaterLevel, 
+                                           FALSE, TRUE))
+  return(vectorTypes)
+}
+
+# Separando variáveis quantitativas pelo número de elementos únicos
+quantitativeData <- function(dataFrame, greaterLevel) {
+  vectorTypes <- sapply(dataFrame, 
+                        function(x) ifelse(max(x) >= greaterLevel, 
+                                           TRUE, FALSE))
+  return(vectorTypes)
+}
+
+categoricas <- categoricalData(risk, 5)
+quantitativas <- quantitativeData(risk, 5)
+```
+
+## Etapa 3 - Verificando se há dados faltantes
+
+```{r dados}
+# Existem valores NA
+sapply(risk, function(x) sum(is.na(x)))
+```
+
+## Etapa 4 - Novo data frame com fator e quantitativas
+
+```{r transformar}
+# Transformando variáveis categóricas em fatores
+ToFactor <- function(dataFrame) {
+  listaVectors <- lapply(dataFrame, factor)
+  df <- as.data.frame(listaVectors)
+  return(df)
+}
+
+riskCat <- ToFactor(risk[,categoricas])
+riskQuant <- risk[,quantitativas]
+
+# Criando uma nova coluna com a idade elevada ao quadrado para verificar sua influência no modelo
+risK <- cbind(riskCat, riskQuant)
+risK$age2 <- risK$age^2
+```
+
+## Etapa 5 - Normalizando dados quantitativos
+
+```{r normalizar}
+# Normalizando variáveis quantitativas
+Normalizar <- function(x) {
+  x <- (x - min(x))/(max(x) - min(x))
+}
+
+riskQuant <- as.data.frame(lapply(riskQuant, Normalizar))
+riskCat <- ToFactor(risk[,categoricas])
+
+# Data frame com variáveis tipo fator e quantitativas normalizadas
+RiskNeural <- cbind(riskCat, riskQuant)
+```
+
+## Etapa 6 - Plotando gráficos
+
+```{r plot}
+# Plotando gráficos de variáveis quantitativas
+library(ggplot2)
+boxplotQuantitative <- function(dataFrame, vectorQuantitativeTrue) {
+  df <- dataFrame[,vectorQuantitativeTrue]
+  plot.graphic <- list()
+  for(i in 1:ncol(df)) {
+    plot.graphic[[i]] <- ggplot(data = risk, mapping = aes(x = factor(credit.rating), group = factor(credit.rating))) +
+      geom_boxplot(aes_string(y = names(df)[i])) + 
+      scale_y_continuous(breaks = scales::extended_breaks(50)) +
+      ggtitle(paste("Crédito aceito ou não x", sep = " ", names(df)[i]))
+  }
+  return(plot.graphic)
+}
+
+boxplotQuantitative(risk, quantitativas)
+
+histogramQuantitative <- function(dataFrame, vectorQuantitativeTrue) {
+  df <- dataFrame[,vectorQuantitativeTrue]
+  plot.graphic <- list()
+  for(i in 1:ncol(df)) {
+    plot.graphic[[i]] <- ggplot(data = risk) +
+      geom_histogram(aes_string(x = names(df)[i]), bins = 15) + 
+      facet_grid(cols = vars(credit.rating)) +
+      scale_y_continuous(breaks = scales::extended_breaks(30)) +
+      ggtitle(paste("Histograma de", sep = " ", names(df)[i]))
+  }
+  return(plot.graphic)
+}
+
+histogramQuantitative(risk, quantitativas)
+
+# Plotando gráficos de variáveis categóricos
+table(risk$credit.rating)
+barsCategorical <- function(dataFrame, vectorQuantitativeTrue) {
+  df <- dataFrame[,vectorQuantitativeTrue]
+  plot.graphic <- list()
+  for(i in 1:ncol(df)) {
+    if(names(df)[i] != "credit.rating") {
+      plot.graphic[[i]] <- ggplot(data = df, aes(fill = factor(credit.rating))) +
+        geom_bar(aes_string(names(df)[i]), position = position_dodge()) + 
+        scale_y_continuous(breaks = scales::extended_breaks(30)) +
+        ggtitle(paste("Gráfico de barras de", sep = " ", names(df)[i]))
+    }
+    else {
+      plot.graphic[[i]] <- ggplot(data = df) +
+        geom_bar(aes_string(names(df)[i])) + 
+        scale_y_continuous(breaks = scales::extended_breaks(30)) +
+        ggtitle(paste("Gráfico de barras de", sep = " ", names(df)[i]))
+    }
+  }
+  return(plot.graphic)
+}
+
+barsCategorical(risk, categoricas)
+```
+
+## Etapa 7 - Calculando correlação entre variáveis
+
+```{r corr}
+# Correlação - correlação baixa entre as variáveis
+library(corrplot)
+corrplot(cor(risk[,quantitativas]))
+```
+
+## Etapa 8 - Feature Selection
+
+```{r feature}
+library(randomForest)
+select.feature <- randomForest(data = risK[,-22], credit.rating ~ ., 
+                               importance = TRUE)
+varImpPlot(select.feature)
+```
+
+## Etapa 9 - Balanceamento de dados e feature selection
+```{r balance}
+library(ROSE)
+creditRiskRose <- ROSE(data = risK[-22], credit.rating ~ ., seed = 1)$data
+table(creditRiskRose$credit.rating)
+select.feature1 <- randomForest(data = risK[-22], credit.rating ~ ., 
+                                importance = TRUE)
+varImpPlot(select.feature1)
+```
+
+## Etapa 10 - Criando modelos
+```{r model}
+# Feature Selection
+# as variáveis importantes:
+# account.balance, credit.duration.months, previous.credit.payment.status,
+# credit.amount, savings, guarantor, current.assets, credit.purpose, age.
+colunas <- c("account.balance","credit.duration.months","previous.credit.payment.status",
+             "credit.amount","savings","guarantor","current.assets","credit.purpose",
+             "age")
+
+paste.formula <- function(resposta, preditora) {
+  form <- paste(resposta, sep = " ", "~ ")
+  for(i in 1:length(preditora)) {
+    if(i == 1) {
+      form <- paste(form, sep = "", preditora[i])
+    }
+    else {
+      form <- paste(form, sep = " + ", preditora[i])
+    }
+  }
+  return(as.formula(form))
+}
+
+# Função cria vários modelos com dados balanceados de formas diferentes - índice 60, performance 0.823
+modelsROSE <- function(quantity) {
+  indices <- c()
+  acuracia <- c()
+  for(i in 1:quantity) {
+    dfROSE <- ROSE(data = risK, credit.rating ~ ., seed = i)$data
+    modelo <- randomForest(data = dfROSE, paste.formula("credit.rating", colunas), importance = TRUE)
+    indices <- c(indices,i)
+    acuracia <- c(acuracia, 
+                  (modelo$confusion[1,1] + modelo$confusion[2,2])/(modelo$confusion[1,1] + modelo$confusion[2,2] + modelo$confusion[1,2] + modelo$confusion[2,1]))
+  }
+  return(list(acuracia, indices))
+}
+
+modelsROSE(100)
+```
+
+## Dividindo dados de treino e teste para ver a performance do modelo
+
+```{r trainTest}
+# Dividindo dados de treino e teste random forest - indice 26, performance 0.89
+trainTest <- function(n) {
+  indices <- c()
+  acuracia <- c()
+  dfROSE <- ROSE(data = risK, credit.rating ~ ., seed = 60)$data
+  for(i in 1:n) {
+    set.seed(i)
+    rows <- sample(1:nrow(risK), 0.8*nrow(risK), replace = FALSE)
+    trainDataSet <- dfROSE[rows,]
+    testDataSet <- dfROSE[-rows,]
+    modelo <- randomForest(data = trainDataSet, paste.formula("credit.rating", colunas), importance = TRUE)
+    pred <- predict(modelo, testDataSet[,-1])
+    indices <- c(indices,i)
+    acuracia <- c(acuracia, mean(testDataSet[,1] == pred))
+  }
+  return(list(acuracia, indices))
+}
+
+trainTest(100)
+```
+
